@@ -4,7 +4,7 @@ using Flux: @epochs, back!, testmode!, throttle
 using Base.Iterators: partition
 using Distributions: Uniform
 using Statistics: mean
-using CUDAnative: tanh, log, exp
+using CUDAnative
 using CuArrays
 
 BATCH_SIZE = 128
@@ -75,11 +75,11 @@ end
 
 using Images
 
-img(x) = Gray.(reshape((x+1)/2, 28, 28))
+img(x) = Gray.(reshape((x.+1)/2, 28, 28))
 
 function sample()
     noise = [rand(dist, noise_dim, 1) for i in 1:36]
-
+    noise = gpu.(noise)
     # Generating Images
     testmode!(generator)
     fake_imgs = img.(map(x -> cpu(generator(x).data), noise))
@@ -101,25 +101,27 @@ function train(x)
     z = rand(dist, noise_dim, BATCH_SIZE) |> gpu
     inp = 2x .- 1 |> gpu
 
-    #zero_grad!(discriminator)
+    zero_grad!(discriminator)
 
     D_real = discriminator(inp)
-    D_real_loss = bce(D_real, ones(Float32,size(D_real.data)))
+    D_real_loss = bce(D_real, CuArray(ones(Float32,size(D_real.data))))
 
     fake_x = generator(z)
     D_fake = discriminator(fake_x)
-    D_fake_loss = bce(D_fake, zero(D_fake.data))
+    D_fake_loss = bce(D_fake, CuArray(zero(D_fake.data)))
 
     D_loss = D_fake_loss + D_real_loss
 
     Flux.back!(D_loss)
     opt_disc()
 
-    z = rand(dist, noise_dim, BATCH_SIZE)
+    zero_grad!(generator)
+
+    z = rand(dist, noise_dim, BATCH_SIZE) |> gpu
 
     fake_x = generator(z)
     D_fake = discriminator(fake_x)
-    G_loss = bce(D_fake, ones(Float32,size(D_fake.data)))
+    G_loss = bce(D_fake, CuArray(ones(Float32,size(D_fake.data))))
 
     Flux.back!(G_loss)
     opt_gen()
@@ -140,22 +142,31 @@ for i = 1:NUM_EPOCHS
 end
 
 
-z = rand(dist, noise_dim, BATCH_SIZE) |> cpu
-inp = 2data[1] .- 1 |> cpu
+save("sample_dcgan.png", sample())
 
-#zero_grad!(discriminator)
+
+
+
+# Scratch Pad
+z = rand(dist, noise_dim, BATCH_SIZE) |> gpu
+inp = 2data[1] .- 1 |> gpu
+
+zero_grad!(discriminator)
 
 D_real = discriminator(inp)
 D_real_loss = bce(D_real.data, ones(size(D_real.data)))
 
 yhat = D_real.data
-y = ones(Float32,size(D_real.data))
+y = CuArray(ones(Float32,size(D_real.data)))
 neg_abs = -abs.(yhat)
-mean(relu.(yhat) .- yhat .* y .+ log.(1 + exp.(neg_abs)))
+mean(relu.(yhat) .- yhat .* y .+ log.(1 .+ exp.(neg_abs)))
+relu.(yhat)
+log.(1 .+ exp.(neg_abs))
+relu.(yhat) .- yhat .* y .+ log.(1 .+ exp.(neg_abs))
+yhat
+y
 
-log.(1 + exp.(neg_abs))
 
-save("sample_dcgan.png", sample())
 
 
 
